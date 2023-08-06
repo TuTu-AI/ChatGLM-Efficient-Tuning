@@ -2,6 +2,7 @@
 
 from typing import Optional, List
 from transformers import Seq2SeqTrainingArguments, TrainerCallback
+import torch
 
 from glmtuner.dsets import DataCollatorForChatGLM, get_dataset, preprocess_dataset, split_dataset
 from glmtuner.extras.callbacks import LogCallback
@@ -67,8 +68,9 @@ def run_sft(
         print('Finished saving metrics')
         trainer.save_state()
         print('Finished saving state')
-        trainer.save_model()
-        print('Finished saving model')
+        if torch.distributed.get_rank() == 0:
+            trainer.save_model()
+            print('Finished saving model under rank 0')
         if trainer.is_world_process_zero() and model_args.plot_loss:
             plot_loss(training_args.output_dir, keys=["loss", "eval_loss"])
 
