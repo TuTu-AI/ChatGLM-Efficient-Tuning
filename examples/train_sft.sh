@@ -2,18 +2,20 @@
 
 CUDA_VISIBLE_DEVICES=0 python ../src/train_bash.py \
     --stage sft \
+    --model_name_or_path ../chatglm2-6b \
     --do_train \
-    --dataset alpaca_gpt4_zh \
+    --dataset lima \
     --dataset_dir ../data \
     --finetuning_type lora \
-    --output_dir path_to_sft_checkpoint \
+    --output_dir ../sft-ckp \
     --overwrite_cache \
-    --per_device_train_batch_size 4 \
-    --gradient_accumulation_steps 4 \
+    --per_device_train_batch_size 1 \
+    --gradient_accumulation_steps 1 \
     --lr_scheduler_type cosine \
-    --logging_steps 10 \
-    --save_steps 1000 \
+    --save_steps 20000 \
+    --warmup_steps 0 \
     --learning_rate 5e-5 \
     --num_train_epochs 3.0 \
     --plot_loss \
-    --fp16
+    --fp16 \
+    # --accelerate config 10 \

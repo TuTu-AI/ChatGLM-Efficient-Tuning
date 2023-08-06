@@ -1,6 +1,8 @@
 import os
 import torch
 from typing import Dict, Optional
+import psutil
+import time
 
 from transformers import Seq2SeqTrainer
 from transformers.trainer import TRAINING_ARGS_NAME
@@ -41,33 +43,48 @@ class PeftTrainer(Seq2SeqTrainer):
         """
         output_dir = output_dir if output_dir is not None else self.args.output_dir
         os.makedirs(output_dir, exist_ok=True)
-        logger.info(f"Saving model checkpoint to {output_dir}")
-        model = unwrap_model(self.model)
+        model_size = sum(tensor.numel() * tensor.element_size() for tensor in self.model.parameters())
+        
+        while True:
+            available_ram = psutil.virtual_memory().available
+            if available_ram > model_size * 2:
+        
+                logger.info(f"Saving model checkpoint to {output_dir}")
+                model = unwrap_model(self.model)
+                rank = torch.distributed.get_rank()
+                if hasattr(model, "pretrained_model"): # for models with valuehead (currently using LoRA only)
+                    print(f'Saving pretrained model for {rank}...')
+                    backbone_model = getattr(model, "pretrained_model")
+                    torch.save(get_state_dict(getattr(model, "v_head")), os.path.join(output_dir, VALUE_HEAD_FILE_NAME))
+                else:
+                    print(f'Not saving pretrained model for {rank}')
+                    backbone_model = model
 
-        if hasattr(model, "pretrained_model"): # for models with valuehead (currently using LoRA only)
-            backbone_model = getattr(model, "pretrained_model")
-            torch.save(get_state_dict(getattr(model, "v_head")), os.path.join(output_dir, VALUE_HEAD_FILE_NAME))
-        else:
-            backbone_model = model
+                if isinstance(backbone_model, PeftModel): # LoRA tuning
+                    print(f'saving peft model for {rank}...')
+                    backbone_model.save_pretrained(output_dir, state_dict=get_state_dict(backbone_model))
+                    print('Saving peft model done')
+                elif isinstance(backbone_model, PreTrainedModel): # freeze/full-tuning or p_tuning
+                    print(f'saving pretrained model for {rank}...')
+                    backbone_model.config.use_cache = True
+                    backbone_model.save_pretrained(
+                        output_dir,
+                        state_dict=get_state_dict(backbone_model, trainable_only=(self.finetuning_args.finetuning_type != "full")),
+                        safe_serialization=self.args.save_safetensors
+                    )
+                    backbone_model.config.use_cache = False
+                    if self.tokenizer is not None:
+                        self.tokenizer.save_pretrained(output_dir)
+                else:
+                    logger.warning("No model to save.")
 
-        if isinstance(backbone_model, PeftModel): # LoRA tuning
-            backbone_model.save_pretrained(output_dir, state_dict=get_state_dict(backbone_model))
-        elif isinstance(backbone_model, PreTrainedModel): # freeze/full-tuning or p_tuning
-            backbone_model.config.use_cache = True
-            backbone_model.save_pretrained(
-                output_dir,
-                state_dict=get_state_dict(backbone_model, trainable_only=(self.finetuning_args.finetuning_type != "full")),
-                safe_serialization=self.args.save_safetensors
-            )
-            backbone_model.config.use_cache = False
-            if self.tokenizer is not None:
-                self.tokenizer.save_pretrained(output_dir)
-        else:
-            logger.warning("No model to save.")
-
-        with open(os.path.join(output_dir, TRAINING_ARGS_NAME), "w", encoding="utf-8") as f:
-            f.write(self.args.to_json_string() + "\n")
-        self.finetuning_args.save_to_json(os.path.join(output_dir, FINETUNING_ARGS_NAME))
+                with open(os.path.join(output_dir, TRAINING_ARGS_NAME), "w", encoding="utf-8") as f:
+                    f.write(self.args.to_json_string() + "\n")
+                self.finetuning_args.save_to_json(os.path.join(output_dir, FINETUNING_ARGS_NAME))
+                break
+            else:
+                logger.warning(f"Not enough RAM to save model checkpoint to {output_dir}. Retrying in 60 seconds...")
+                time.sleep(15)    
 
     def _load_best_model(self):
         r"""

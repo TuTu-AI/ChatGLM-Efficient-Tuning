@@ -1,4 +1,4 @@
-# Inspired by: https://github.com/THUDM/ChatGLM-6B/blob/main/ptuning/main.py
+# Inspired by: https://github.com/THUDM/ChatGLM -6B/blob/main/ptuning/main.py
 
 from typing import Optional, List
 from transformers import Seq2SeqTrainingArguments, TrainerCallback
@@ -59,10 +59,16 @@ def run_sft(
     # Training
     if training_args.do_train:
         train_result = trainer.train()
+        print(trainer.is_world_process_zero())
+        print('Train finished')
         trainer.log_metrics("train", train_result.metrics)
+        print('Finished logging metrics')
         trainer.save_metrics("train", train_result.metrics)
+        print('Finished saving metrics')
         trainer.save_state()
+        print('Finished saving state')
         trainer.save_model()
+        print('Finished saving model')
         if trainer.is_world_process_zero() and model_args.plot_loss:
             plot_loss(training_args.output_dir, keys=["loss", "eval_loss"])
 
